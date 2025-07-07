@@ -1,0 +1,333 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>3D Rotary Position Encoding (RoPE) Visualizer</title>
+    <meta name="description" content="Interactive 3D visualization of Rotary Position Encoding (RoPE) for transformer models">
+    <meta name="keywords" content="RoPE, transformer, position encoding, 3D visualization, machine learning">
+    <meta name="author" content="RoPE Visualizer">
+    
+    <!-- PWA manifest -->
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#4CAF50">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="RoPE 3D">
+    
+    <!-- Icons -->
+    <link rel="icon" type="image/x-icon" href="assets/icons/favicon.ico">
+    <link rel="apple-touch-icon" sizes="192x192" href="assets/icons/icon-192.png">
+    <link rel="apple-touch-icon" sizes="512x512" href="assets/icons/icon-512.png">
+    
+    <!-- CSS -->
+    <link rel="stylesheet" href="css/main.css">
+    <link rel="stylesheet" href="css/controls.css">
+    <link rel="stylesheet" href="css/responsive.css">
+    
+    <!-- Preload critical resources -->
+    <link rel="preload" href="lib/three.min.js" as="script">
+    <link rel="preload" href="lib/math.min.js" as="script">
+</head>
+<body>
+    <!-- Loading overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Loading RoPE Visualizer...</div>
+    </div>
+    
+    <!-- Main application -->
+    <div id="app" class="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <h1 class="title">
+                    <span class="title-main">3D RoPE Visualizer</span>
+                    <span class="title-sub">Rotary Position Encoding</span>
+                </h1>
+                <div class="header-controls">
+                    <button id="help-btn" class="btn btn-icon" title="Help" aria-label="Help">
+                        <span class="icon">?</span>
+                    </button>
+                    <button id="about-btn" class="btn btn-icon" title="About" aria-label="About">
+                        <span class="icon">i</span>
+                    </button>
+                    <button id="fullscreen-btn" class="btn btn-icon" title="Fullscreen (F)" aria-label="Fullscreen">
+                        <span class="icon">⛶</span>
+                    </button>
+                </div>
+            </div>
+        </header>
+        
+        <!-- Main content -->
+        <main class="main">
+            <!-- Visualization container -->
+            <div class="visualization-container">
+                <canvas id="canvas" class="canvas"></canvas>
+                
+                <!-- Performance overlay -->
+                <div id="performance-overlay" class="performance-overlay">
+                    <div class="performance-item">
+                        <span class="performance-label">FPS:</span>
+                        <span id="fps-counter" class="performance-value">60</span>
+                    </div>
+                    <div class="performance-item">
+                        <span class="performance-label">Points:</span>
+                        <span id="point-counter" class="performance-value">0</span>
+                    </div>
+                </div>
+                
+                <!-- Legend -->
+                <div class="legend">
+                    <div class="legend-title">Color Coding</div>
+                    <div class="legend-items">
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: #ff4444;"></div>
+                            <span class="legend-label">Time (T)</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: #44ff44;"></div>
+                            <span class="legend-label">Height (H)</span>
+                        </div>
+                        <div class="legend-item">
+                            <div class="legend-color" style="background-color: #4444ff;"></div>
+                            <span class="legend-label">Width (W)</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Controls panel -->
+            <div class="controls-panel">
+                <!-- Step indicator -->
+                <div class="step-indicator">
+                    <div class="step-header">
+                        <div class="step-nav">
+                            <button id="prev-step" class="btn btn-nav" title="Previous Step (←)" aria-label="Previous Step">
+                                <span class="icon">←</span>
+                            </button>
+                            <div class="step-info">
+                                <span class="step-counter">
+                                    Step <span id="current-step">1</span> of <span id="total-steps">4</span>
+                                </span>
+                            </div>
+                            <button id="next-step" class="btn btn-nav" title="Next Step (→)" aria-label="Next Step">
+                                <span class="icon">→</span>
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div class="step-content">
+                        <h3 id="step-title" class="step-title">Position Grid</h3>
+                        <p id="step-description" class="step-description">
+                            Creating 3D position coordinates for each voxel in the space
+                        </p>
+                        
+                        <div class="step-code">
+                            <pre id="step-code" class="code-block"><code># Step 1: Create position grid
+positions = torch.meshgrid(
+    torch.arange(t_len),
+    torch.arange(h_len), 
+    torch.arange(w_len)
+)</code></pre>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Parameters -->
+                <div class="parameters-section">
+                    <h3 class="section-title">Parameters</h3>
+                    
+                    <div class="parameter-group">
+                        <div class="parameter-item">
+                            <label for="time-slider" class="parameter-label">
+                                Time Length: <span id="time-value">16</span>
+                            </label>
+                            <input type="range" id="time-slider" class="slider" 
+                                   min="4" max="32" value="16" step="1">
+                        </div>
+                        
+                        <div class="parameter-item">
+                            <label for="height-slider" class="parameter-label">
+                                Height: <span id="height-value">30</span>
+                            </label>
+                            <input type="range" id="height-slider" class="slider" 
+                                   min="8" max="60" value="30" step="1">
+                        </div>
+                        
+                        <div class="parameter-item">
+                            <label for="width-slider" class="parameter-label">
+                                Width: <span id="width-value">60</span>
+                            </label>
+                            <input type="range" id="width-slider" class="slider" 
+                                   min="16" max="120" value="60" step="1">
+                        </div>
+                        
+                        <div class="parameter-item">
+                            <label for="dim-slider" class="parameter-label">
+                                Dimension: <span id="dim-value">128</span>
+                            </label>
+                            <input type="range" id="dim-slider" class="slider" 
+                                   min="64" max="256" value="128" step="64">
+                        </div>
+                        
+                        <div class="parameter-item">
+                            <label for="theta-slider" class="parameter-label">
+                                Theta (×1000): <span id="theta-value">10</span>
+                            </label>
+                            <input type="range" id="theta-slider" class="slider" 
+                                   min="1" max="50" value="10" step="1">
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Animation controls -->
+                <div class="animation-section">
+                    <h3 class="section-title">Animation</h3>
+                    
+                    <div class="parameter-group">
+                        <div class="parameter-item">
+                            <label for="time-slice-slider" class="parameter-label">
+                                Time Slice: <span id="time-slice-value">0</span>
+                            </label>
+                            <input type="range" id="time-slice-slider" class="slider" 
+                                   min="0" max="15" value="0" step="1">
+                        </div>
+                        
+                        <div class="parameter-item">
+                            <label for="speed-slider" class="parameter-label">
+                                Speed: <span id="speed-value">1.0</span>x
+                            </label>
+                            <input type="range" id="speed-slider" class="slider" 
+                                   min="0.1" max="3.0" value="1.0" step="0.1">
+                        </div>
+                        
+                        <div class="parameter-item">
+                            <label for="quality-slider" class="parameter-label">
+                                Quality: <span id="quality-value">Medium</span>
+                            </label>
+                            <input type="range" id="quality-slider" class="slider" 
+                                   min="1" max="3" value="2" step="1">
+                        </div>
+                    </div>
+                    
+                    <div class="control-buttons">
+                        <button id="play-pause-btn" class="btn btn-primary" title="Play/Pause (Space)" aria-label="Play/Pause">
+                            <span class="icon">▶</span>
+                            <span class="btn-text">Play</span>
+                        </button>
+                        <button id="reset-btn" class="btn btn-secondary" title="Reset (R)" aria-label="Reset">
+                            <span class="icon">↻</span>
+                            <span class="btn-text">Reset</span>
+                        </button>
+                        <button id="export-btn" class="btn btn-secondary" title="Export PNG" aria-label="Export PNG">
+                            <span class="icon">📷</span>
+                            <span class="btn-text">Export</span>
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </main>
+        
+        <!-- Footer -->
+        <footer class="footer">
+            <div class="footer-content">
+                <div class="footer-text">
+                    <span>Educational visualization of 3D Rotary Position Encoding</span>
+                </div>
+                <div class="footer-shortcuts">
+                    <span class="shortcut">Space: Play/Pause</span>
+                    <span class="shortcut">← →: Steps</span>
+                    <span class="shortcut">R: Reset</span>
+                    <span class="shortcut">F: Fullscreen</span>
+                </div>
+            </div>
+        </footer>
+    </div>
+    
+    <!-- Help Modal -->
+    <div id="help-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">Help - RoPE 3D Visualizer</h2>
+                <button class="modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <h3>What is RoPE?</h3>
+                <p>Rotary Position Encoding (RoPE) is a method for encoding positional information in transformer models. It applies rotations to pairs of dimensions in the embedding space, allowing the model to understand relative positions.</p>
+                
+                <h3>Visualization Steps</h3>
+                <ol>
+                    <li><strong>Position Grid:</strong> Shows the 3D coordinate system with time, height, and width dimensions.</li>
+                    <li><strong>Frequency Scale:</strong> Different dimensions get different frequency scales for encoding.</li>
+                    <li><strong>Rotation Matrix:</strong> Rotation matrices using sin/cos functions encode positional relationships.</li>
+                    <li><strong>Final Encoding:</strong> All dimensional encodings are concatenated to create the final positional embedding.</li>
+                </ol>
+                
+                <h3>Controls</h3>
+                <ul>
+                    <li><strong>Mouse:</strong> Drag to rotate, wheel to zoom</li>
+                    <li><strong>Arrow Keys:</strong> Navigate between steps</li>
+                    <li><strong>Space:</strong> Play/pause animation</li>
+                    <li><strong>R:</strong> Reset view</li>
+                    <li><strong>F:</strong> Toggle fullscreen</li>
+                </ul>
+                
+                <h3>Parameters</h3>
+                <ul>
+                    <li><strong>Time Length:</strong> Number of time steps (4-32)</li>
+                    <li><strong>Height/Width:</strong> Spatial dimensions</li>
+                    <li><strong>Dimension:</strong> Embedding dimension (64-256)</li>
+                    <li><strong>Theta:</strong> Base frequency for rotations</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <!-- About Modal -->
+    <div id="about-modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2 class="modal-title">About</h2>
+                <button class="modal-close" aria-label="Close">&times;</button>
+            </div>
+            <div class="modal-body">
+                <h3>3D RoPE Visualizer</h3>
+                <p>An interactive educational tool for understanding 3D Rotary Position Encoding in transformer models.</p>
+                
+                <h3>Features</h3>
+                <ul>
+                    <li>Real-time 3D visualization</li>
+                    <li>Step-by-step educational flow</li>
+                    <li>Interactive parameter controls</li>
+                    <li>Performance optimized rendering</li>
+                    <li>Mobile-friendly responsive design</li>
+                    <li>Offline PWA capability</li>
+                </ul>
+                
+                <h3>Technical Implementation</h3>
+                <p>Built with Three.js for 3D rendering, implementing the exact RoPE algorithm from research papers. Supports up to 5000 points with instanced rendering for smooth performance.</p>
+                
+                <h3>License</h3>
+                <p>MIT License - See LICENSE file for details</p>
+                
+                <div class="about-links">
+                    <a href="https://github.com/yourusername/rope-3d-visualizer" target="_blank" rel="noopener noreferrer">
+                        GitHub Repository
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Scripts -->
+    <script src="lib/three.min.js"></script>
+    <script src="lib/math.min.js"></script>
+    <script src="js/utils.js"></script>
+    <script src="js/rope-math.js"></script>
+    <script src="js/visualization.js"></script>
+    <script src="js/ui-controls.js"></script>
+    <script src="js/steps.js"></script>
+    <script src="js/main.js"></script>
+</body>
+</html>
