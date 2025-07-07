@@ -44,7 +44,7 @@ class RopeVisualizer {
             await this.setupEventListeners();
             await this.setupResizeObserver();
             
-            this.registerServiceWorker();
+            // this.registerServiceWorker();
             
             this.state.isInitialized = true;
             this.state.isLoading = false;
