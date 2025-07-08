@@ -14,9 +14,13 @@ class Visualization {
         this.animationSpeed = 1.0;
         
         this.maxPoints = 50000; // Support much larger tensors
-        this.pointRadius = 0.05; // Smaller spheres for dense 3D tensor
         this.currentStep = 0;
         this.currentData = [];
+        
+        // Dynamic properties that adapt to tensor size
+        this.tensorCenter = { x: 0, y: 0, z: 0 };
+        this.tensorDimensions = { t_len: 1, h_len: 1, w_len: 1 };
+        this.adaptiveScale = { sphere: 0.05, vector: 1.0, spacing: 1.0 };
         
         this.geometry = null;
         this.material = null;
@@ -29,6 +33,10 @@ class Visualization {
             frameCount: 0,
             fps: 60
         };
+        
+        // Visualization groups
+        this.vectorGroup = null;
+        this.rotationGroup = null;
         
         this.init();
     }
@@ -59,11 +67,104 @@ class Visualization {
         this.camera.lookAt(0, 0, 0);
     }
     
+    // FIXED: Dynamic tensor center calculation from actual data
+    getTensorCenter(data) {
+        if (!data || data.length === 0) {
+            return { x: 0, y: 0, z: 0 };
+        }
+        
+        let minX = Infinity, maxX = -Infinity;
+        let minY = Infinity, maxY = -Infinity;
+        let minZ = Infinity, maxZ = -Infinity;
+        
+        for (const point of data) {
+            if (point.position) {
+                minX = Math.min(minX, point.position[0]);
+                maxX = Math.max(maxX, point.position[0]);
+                minY = Math.min(minY, point.position[1]);
+                maxY = Math.max(maxY, point.position[1]);
+                minZ = Math.min(minZ, point.position[2]);
+                maxZ = Math.max(maxZ, point.position[2]);
+            }
+        }
+        
+        return {
+            x: (minX + maxX) / 2,
+            y: (minY + maxY) / 2,
+            z: (minZ + maxZ) / 2
+        };
+    }
+    
+    // FIXED: Adaptive scaling based on tensor dimensions
+    getAdaptiveScale(t_len, h_len, w_len) {
+        const maxDim = Math.max(t_len, h_len, w_len);
+        const totalPoints = t_len * h_len * w_len;
+        
+        // Adaptive sphere radius: smaller for denser tensors
+        const baseSphereRadius = 0.1;
+        const sphereScale = Math.max(0.02, baseSphereRadius / Math.pow(maxDim, 0.3));
+        
+        // Adaptive vector scaling
+        const baseVectorScale = 1.0;
+        const vectorScale = baseVectorScale * Math.max(0.5, Math.min(2.0, 10 / maxDim));
+        
+        // Adaptive spacing
+        const baseSpacing = 1.0;
+        const spacingScale = baseSpacing * Math.max(0.3, Math.min(1.5, 20 / maxDim));
+        
+        return {
+            sphere: sphereScale,
+            vector: vectorScale,
+            spacing: spacingScale
+        };
+    }
+    
+    // FIXED: Temporal-aware subsampling that preserves time relationships
+    subsampleWithTemporalContinuity(data, targetCount) {
+        if (data.length <= targetCount) {
+            return data;
+        }
+        
+        // Extract tensor dimensions from data
+        const coords = data.map(p => p.originalIndices || p.coordinates || { t: 0, h: 0, w: 0 });
+        const maxT = Math.max(...coords.map(c => c.t));
+        const maxH = Math.max(...coords.map(c => c.h));
+        const maxW = Math.max(...coords.map(c => c.w));
+        
+        const t_len = maxT + 1;
+        const h_len = maxH + 1;
+        const w_len = maxW + 1;
+        
+        // Calculate sampling ratios that preserve temporal structure
+        const totalRatio = Math.pow(targetCount / data.length, 1/3);
+        const tStep = Math.max(1, Math.round(t_len / Math.ceil(t_len * totalRatio)));
+        const hStep = Math.max(1, Math.round(h_len / Math.ceil(h_len * totalRatio)));
+        const wStep = Math.max(1, Math.round(w_len / Math.ceil(w_len * totalRatio)));
+        
+        const subsample = [];
+        for (let i = 0; i < data.length; i++) {
+            const point = data[i];
+            const coord = point.originalIndices || point.coordinates || { t: 0, h: 0, w: 0 };
+            
+            if (coord.t % tStep === 0 && coord.h % hStep === 0 && coord.w % wStep === 0) {
+                subsample.push(point);
+            }
+        }
+        
+        return subsample.length > 0 ? subsample : data.slice(0, targetCount);
+    }
+    
     updateCameraForTensor(t_len, h_len, w_len) {
-        // Calculate tensor center
+        // Store tensor dimensions
+        this.tensorDimensions = { t_len, h_len, w_len };
+        
+        // Calculate tensor center (matches data coordinate system)
         const centerX = (w_len - 1) / 2;
         const centerY = (h_len - 1) / 2;  
         const centerZ = (t_len - 1) / 2;
+        
+        // Update stored tensor center
+        this.tensorCenter = { x: centerX, y: centerY, z: centerZ };
         
         // Calculate optimal camera distance based on tensor size
         const maxDim = Math.max(w_len, h_len, t_len);
@@ -81,6 +182,39 @@ class Visualization {
         if (this.controls) {
             this.controls.target.set(centerX, centerY, centerZ);
             this.controls.update();
+        }
+        
+        // Update adaptive scaling
+        this.adaptiveScale = this.getAdaptiveScale(t_len, h_len, w_len);
+        
+        // Update visualization scale
+        this.updateVisualizationScale();
+    }
+    
+    // FIXED: Update all visualization elements when tensor size changes
+    updateVisualizationScale() {
+        // Update instanced mesh sphere radius
+        if (this.geometry) {
+            this.geometry.dispose();
+            this.geometry = new THREE.SphereGeometry(this.adaptiveScale.sphere, 8, 6);
+            if (this.instancedMesh) {
+                this.instancedMesh.geometry = this.geometry;
+            }
+        }
+        
+        // Update axes helper size
+        if (this.axesHelper) {
+            this.scene.remove(this.axesHelper);
+            const axesSize = Math.max(5, Math.min(25, Math.max(this.tensorDimensions.t_len, 
+                                                               this.tensorDimensions.h_len, 
+                                                               this.tensorDimensions.w_len) * 0.8));
+            this.axesHelper = new THREE.AxesHelper(axesSize);
+            this.axesHelper.position.set(
+                this.tensorCenter.x - axesSize * 0.8,
+                this.tensorCenter.y - axesSize * 0.8,
+                this.tensorCenter.z - axesSize * 0.8
+            );
+            this.scene.add(this.axesHelper);
         }
     }
 
@@ -140,7 +274,7 @@ class Visualization {
 
     setupAxes() {
         this.axesHelper = new THREE.AxesHelper(15);
-        this.axesHelper.position.set(-1, -1, -1); // Position slightly before tensor origin for visibility
+        this.axesHelper.position.set(-1, -1, -1);
         this.scene.add(this.axesHelper);
         
         const axesColors = [0xff0000, 0x00ff00, 0x0000ff];
@@ -172,7 +306,7 @@ class Visualization {
     }
 
     setupInstancedMesh() {
-        this.geometry = new THREE.SphereGeometry(this.pointRadius, 8, 6);
+        this.geometry = new THREE.SphereGeometry(this.adaptiveScale.sphere, 8, 6);
         this.material = new THREE.MeshLambertMaterial({ 
             vertexColors: true,
             transparent: true,
@@ -203,21 +337,19 @@ class Visualization {
     }
 
     updateVisualization(data, step) {
-        console.log(`Visualization: Updating step ${step} with ${data?.length || 0} points`);
-        console.log('First data point:', data?.[0]);
-        
         this.currentData = data;
         this.currentStep = step;
         
         if (!data || data.length === 0) {
-            console.log('No data, setting count to 0');
             this.instancedMesh.count = 0;
             return;
         }
         
-        // Extract tensor dimensions from first data point if available
+        // Update tensor center from data
+        this.tensorCenter = this.getTensorCenter(data);
+        
+        // Extract tensor dimensions from data for camera positioning
         if (data[0] && data[0].originalIndices) {
-            // Find max dimensions by scanning data
             let maxT = 0, maxH = 0, maxW = 0;
             for (const point of data) {
                 if (point.originalIndices) {
@@ -226,11 +358,15 @@ class Visualization {
                     maxW = Math.max(maxW, point.originalIndices.w);
                 }
             }
-            // Update camera for actual tensor size
-            this.updateCameraForTensor(maxT + 1, maxH + 1, maxW + 1);
+            this.tensorDimensions = { t_len: maxT + 1, h_len: maxH + 1, w_len: maxW + 1 };
+            this.adaptiveScale = this.getAdaptiveScale(this.tensorDimensions.t_len, 
+                                                       this.tensorDimensions.h_len, 
+                                                       this.tensorDimensions.w_len);
         }
         
-        const pointCount = Math.min(data.length, this.maxPoints);
+        // Apply LOD (Level of Detail) for performance
+        const lodData = this.applyLevelOfDetail(data);
+        const pointCount = Math.min(lodData.length, this.maxPoints);
         this.instancedMesh.count = pointCount;
         
         const matrix = new THREE.Matrix4();
@@ -239,10 +375,10 @@ class Visualization {
         const quaternion = new THREE.Quaternion();
         
         for (let i = 0; i < pointCount; i++) {
-            const point = data[i];
+            const point = lodData[i];
             if (!point || !point.position) continue;
             
-            // Use the exact position from the data (already mapped correctly)
+            // Use exact position from data without hardcoded offsets
             position.set(
                 point.position[0],
                 point.position[1], 
@@ -253,12 +389,11 @@ class Visualization {
                 quaternion.setFromAxisAngle(new THREE.Vector3(0, 0, 1), point.angle * 0.1);
                 scale.setScalar(0.8 + 0.4 * Math.sin(point.angle));
             } else if (point.size !== undefined) {
-                // Scale points based on RoPE encoding magnitude
                 quaternion.set(0, 0, 0, 1);
-                scale.setScalar(Math.max(0.5, point.size));
+                scale.setScalar(Math.max(0.5, point.size * this.adaptiveScale.sphere * 10));
             } else {
                 quaternion.set(0, 0, 0, 1);
-                scale.setScalar(1);
+                scale.setScalar(this.adaptiveScale.sphere * 20); // Scale with adaptive radius
             }
             
             matrix.compose(position, quaternion, scale);
@@ -280,10 +415,26 @@ class Visualization {
         this.clearVectorVisualization();
         this.clearRotationVisualization();
         
-        // Only show final RoPE encoding visualization
-        this.visualizeFinalRoPEEncoding(data);
+        // Show final RoPE encoding visualization
+        this.visualizeFinalRoPEEncoding(lodData);
         
-        this.updateTrails(data, step);
+        this.updateTrails(lodData, step);
+    }
+    
+    // FIXED: Level of Detail system for performance optimization
+    applyLevelOfDetail(data) {
+        const totalPoints = data.length;
+        
+        // Performance thresholds
+        if (totalPoints <= 1000) {
+            return data; // Show all points for small tensors
+        } else if (totalPoints <= 5000) {
+            return this.subsampleWithTemporalContinuity(data, 2000); // Medium LOD
+        } else if (totalPoints <= 20000) {
+            return this.subsampleWithTemporalContinuity(data, 1000); // High LOD
+        } else {
+            return this.subsampleWithTemporalContinuity(data, 500); // Ultra LOD
+        }
     }
     
     clearVectorVisualization() {
@@ -298,420 +449,45 @@ class Visualization {
         }
     }
     
-    visualizeRotationMatrices(data) {
-        const maxVectors = Math.min(200, data.length); // Limit for performance
-        
-        for (let i = 0; i < maxVectors; i += 3) { // Sample every 3rd point
-            const point = data[i];
-            if (!point || !point.rotatedVectors) continue;
-            
-            const basePos = new THREE.Vector3(
-                point.position[0] - 8,
-                point.position[1] - 15,
-                point.position[2] - 30
-            );
-            
-            // Show rotation vectors for time dimension
-            this.createVector(
-                basePos,
-                point.rotatedVectors.t,
-                0xff4444, // Red for time
-                1.5
-            );
-            
-            // Show rotation vectors for height dimension  
-            this.createVector(
-                basePos,
-                point.rotatedVectors.h,
-                0x44ff44, // Green for height
-                1.0
-            );
-            
-            // Show rotation vectors for width dimension
-            this.createVector(
-                basePos,
-                point.rotatedVectors.w,
-                0x4444ff, // Blue for width
-                0.8
-            );
-        }
-    }
-    
-    visualizeEncodingVectors(data) {
-        const maxVectors = Math.min(150, data.length);
-        
-        for (let i = 0; i < maxVectors; i += 4) {
-            const point = data[i];
-            if (!point || !point.encoding) continue;
-            
-            const basePos = new THREE.Vector3(
-                point.position[0] - 8,
-                point.position[1] - 15,
-                point.position[2] - 30
-            );
-            
-            // Visualize first few encoding dimensions as vectors
-            for (let dim = 0; dim < Math.min(6, point.encoding.length); dim += 2) {
-                const x = point.encoding[dim] || 0;
-                const y = point.encoding[dim + 1] || 0;
-                
-                this.createVector(
-                    basePos,
-                    [x, y],
-                    0xffffff,
-                    0.5 + dim * 0.1
-                );
-            }
-        }
-    }
-    
-    createVector(startPos, direction, color, scale = 1.0) {
-        const vectorLength = Math.sqrt(direction[0] * direction[0] + direction[1] * direction[1]) * scale;
-        if (vectorLength < 0.1) return; // Skip very small vectors
-        
-        // Create arrow geometry
-        const arrowGeometry = new THREE.ConeGeometry(0.1, 0.3, 8);
-        const arrowMaterial = new THREE.MeshBasicMaterial({ color: color });
-        const arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
-        
-        // Create line geometry
-        const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(0, 0, 0),
-            new THREE.Vector3(direction[0] * scale, direction[1] * scale, 0)
-        ]);
-        const lineMaterial = new THREE.LineBasicMaterial({ color: color });
-        const line = new THREE.Line(lineGeometry, lineMaterial);
-        
-        // Position the vector
-        const vectorGroup = new THREE.Group();
-        vectorGroup.add(line);
-        vectorGroup.add(arrow);
-        
-        // Position arrow at end of line
-        arrow.position.set(direction[0] * scale, direction[1] * scale, 0);
-        arrow.lookAt(
-            direction[0] * scale * 1.1,
-            direction[1] * scale * 1.1,
-            0
-        );
-        
-        vectorGroup.position.copy(startPos);
-        this.vectorGroup.add(vectorGroup);
-    }
-    
-    visualizeRotationMatricesNew(data) {
-        const maxPoints = Math.min(80, data.length);
-        
-        for (let i = 0; i < maxPoints; i += 3) {
-            const point = data[i];
-            if (!point || point.type !== 'rotation_matrix') continue;
-            
-            const basePos = new THREE.Vector3(...point.position);
-            
-            // Visualize all rotation frequencies for each dimension
-            if (point.allRotatedVectors) {
-                this.visualizeRotationDimension(basePos, point.allRotatedVectors.t, 0xff4444, 'T', [0.5, 0, 0]);
-                this.visualizeRotationDimension(basePos, point.allRotatedVectors.h, 0x44ff44, 'H', [0, 0.5, 0]);
-                this.visualizeRotationDimension(basePos, point.allRotatedVectors.w, 0x4444ff, 'W', [0, 0, 0.5]);
-            }
-        }
-    }
-    
-    visualizeRotationDimension(basePos, rotationData, color, label, offset) {
-        if (!rotationData || rotationData.length === 0) return;
-        
-        // Show first few frequency components' rotations
-        const maxFreqs = Math.min(4, rotationData.length);
-        
-        for (let f = 0; f < maxFreqs; f++) {
-            const rotData = rotationData[f];
-            if (!rotData || !rotData.vectors) continue;
-            
-            // Position offset for different frequencies
-            const offsetPos = new THREE.Vector3(
-                basePos.x + offset[0] * f,
-                basePos.y + offset[1] * f,
-                basePos.z + offset[2] * f
-            );
-            
-            // Show rotated vectors with decreasing opacity for higher frequencies
-            const opacity = 0.8 - f * 0.15;
-            const scale = 1.0 - f * 0.15;
-            
-            // Show the first two rotated vectors (most important)
-            for (let v = 0; v < Math.min(2, rotData.vectors.length); v++) {
-                const vector = rotData.vectors[v];
-                this.createRotationArrow(offsetPos, vector, color, scale, f, v, opacity);
-            }
-            
-            // Add small sphere to mark the rotation center
-            this.createRotationMarker(offsetPos, color, f, opacity);
-        }
-    }
-    
-    createRotationArrow(startPos, direction, color, scale, freqIndex, vectorIndex, opacity) {
-        const vectorLength = Math.sqrt(direction[0] * direction[0] + direction[1] * direction[1]);
-        if (vectorLength < 0.05) return;
-        
-        // Create arrow with varying sizes
-        const arrowSize = 0.04 + freqIndex * 0.01;
-        const arrowGeometry = new THREE.ConeGeometry(arrowSize, arrowSize * 3, 6);
-        const arrowMaterial = new THREE.MeshBasicMaterial({ 
-            color: color, 
-            transparent: true, 
-            opacity: opacity
-        });
-        const arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
-        
-        // Create line
-        const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(0, 0, 0),
-            new THREE.Vector3(direction[0] * scale, direction[1] * scale, 0)
-        ]);
-        const lineMaterial = new THREE.LineBasicMaterial({ 
-            color: color, 
-            transparent: true, 
-            opacity: opacity * 0.8
-        });
-        const line = new THREE.Line(lineGeometry, lineMaterial);
-        
-        // Position arrow
-        arrow.position.set(direction[0] * scale, direction[1] * scale, 0);
-        const angle = Math.atan2(direction[1], direction[0]);
-        arrow.rotateZ(angle - Math.PI / 2);
-        
-        // Group them
-        const rotGroup = new THREE.Group();
-        rotGroup.add(line);
-        rotGroup.add(arrow);
-        rotGroup.position.copy(startPos);
-        
-        this.rotationGroup.add(rotGroup);
-    }
-    
-    createRotationMarker(position, color, freqIndex, opacity) {
-        // Create small sphere to mark rotation center
-        const sphereGeometry = new THREE.SphereGeometry(0.02 + freqIndex * 0.005, 6, 4);
-        const sphereMaterial = new THREE.MeshBasicMaterial({ 
-            color: color,
-            transparent: true,
-            opacity: opacity * 0.6
-        });
-        const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-        sphere.position.copy(position);
-        
-        this.rotationGroup.add(sphere);
-    }
-    
-    visualizeEncodingVectorsNew(data) {
-        const maxVectors = Math.min(80, data.length);
-        
-        for (let i = 0; i < maxVectors; i += 3) {
-            const point = data[i];
-            if (!point || point.type !== 'final_encoding') continue;
-            
-            const basePos = new THREE.Vector3(...point.position);
-            
-            // Show encoding as multiple vectors
-            if (point.encoding) {
-                const numPairs = Math.min(3, Math.floor(point.encoding.length / 4));
-                
-                for (let pair = 0; pair < numPairs; pair++) {
-                    const idx = pair * 4;
-                    const vec1 = [point.encoding[idx], point.encoding[idx + 1]];
-                    const vec2 = [point.encoding[idx + 2], point.encoding[idx + 3]];
-                    
-                    const color = [0xff8888, 0x88ff88, 0x8888ff][pair];
-                    this.createArrow(basePos, vec1, color, 0.8 + pair * 0.2, `e${pair}a`);
-                    this.createArrow(basePos, vec2, color, 0.8 + pair * 0.2, `e${pair}b`);
-                }
-            }
-        }
-    }
-    
-    createArrow(startPos, direction, color, scale = 1.0, label = '') {
-        const vectorLength = Math.sqrt(direction[0] * direction[0] + direction[1] * direction[1]);
-        if (vectorLength < 0.05) return;
-        
-        // Create arrow
-        const arrowGeometry = new THREE.ConeGeometry(0.08, 0.25, 6);
-        const arrowMaterial = new THREE.MeshBasicMaterial({ color: color, transparent: true, opacity: 0.8 });
-        const arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
-        
-        // Create line
-        const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(0, 0, 0),
-            new THREE.Vector3(direction[0] * scale, direction[1] * scale, 0)
-        ]);
-        const lineMaterial = new THREE.LineBasicMaterial({ color: color, transparent: true, opacity: 0.7 });
-        const line = new THREE.Line(lineGeometry, lineMaterial);
-        
-        // Position arrow
-        arrow.position.set(direction[0] * scale, direction[1] * scale, 0);
-        const angle = Math.atan2(direction[1], direction[0]);
-        arrow.rotateZ(angle - Math.PI / 2);
-        
-        // Group them
-        const arrowGroup = new THREE.Group();
-        arrowGroup.add(line);
-        arrowGroup.add(arrow);
-        arrowGroup.position.copy(startPos);
-        
-        this.vectorGroup.add(arrowGroup);
-    }
-    
-    visualizeAllFrequencies(data) {
-        const maxPoints = Math.min(120, data.length);
-        
-        for (let i = 0; i < maxPoints; i += 2) {
-            const point = data[i];
-            if (!point || point.type !== 'frequency_point') continue;
-            
-            const basePos = new THREE.Vector3(...point.position);
-            
-            // Visualize frequency responses for each dimension
-            if (point.responses) {
-                this.visualizeFrequencyDimension(basePos, point.responses.t, 0xff4444, 'T', [1, 0, 0]);
-                this.visualizeFrequencyDimension(basePos, point.responses.h, 0x44ff44, 'H', [0, 1, 0]);
-                this.visualizeFrequencyDimension(basePos, point.responses.w, 0x4444ff, 'W', [0, 0, 1]);
-            }
-        }
-    }
-    
-    visualizeFrequencyDimension(basePos, responses, color, label, offset) {
-        if (!responses || responses.length === 0) return;
-        
-        // Show first few frequency components as vectors
-        const maxFreqs = Math.min(5, responses.length);
-        
-        for (let f = 0; f < maxFreqs; f++) {
-            const response = responses[f];
-            if (!response) continue;
-            
-            // Create vector representing sin/cos pair
-            const sinCosVector = [response.sin, response.cos];
-            const magnitude = Math.sqrt(sinCosVector[0] * sinCosVector[0] + sinCosVector[1] * sinCosVector[1]);
-            
-            if (magnitude < 0.1) continue;
-            
-            // Position offset for different dimensions
-            const offsetPos = new THREE.Vector3(
-                basePos.x + offset[0] * f * 0.3,
-                basePos.y + offset[1] * f * 0.3,
-                basePos.z + offset[2] * f * 0.3
-            );
-            
-            // Scale vector by frequency importance (lower frequencies are more important)
-            const freqScale = 1.0 / (1 + f * 0.5);
-            const scale = magnitude * freqScale * 1.5;
-            
-            // Create frequency vector
-            this.createFrequencyVector(offsetPos, sinCosVector, color, scale, f);
-            
-            // Add frequency value as small sphere
-            this.createFrequencyMarker(offsetPos, response.freq, color, f);
-        }
-    }
-    
-    createFrequencyVector(startPos, direction, color, scale, freqIndex) {
-        const vectorLength = Math.sqrt(direction[0] * direction[0] + direction[1] * direction[1]);
-        if (vectorLength < 0.05) return;
-        
-        // Create thinner arrow for frequency visualization
-        const arrowGeometry = new THREE.ConeGeometry(0.05, 0.15, 6);
-        const arrowMaterial = new THREE.MeshBasicMaterial({ 
-            color: color, 
-            transparent: true, 
-            opacity: 0.7 - freqIndex * 0.1 
-        });
-        const arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
-        
-        // Create line with varying thickness
-        const lineGeometry = new THREE.BufferGeometry().setFromPoints([
-            new THREE.Vector3(0, 0, 0),
-            new THREE.Vector3(direction[0] * scale, direction[1] * scale, 0)
-        ]);
-        const lineMaterial = new THREE.LineBasicMaterial({ 
-            color: color, 
-            transparent: true, 
-            opacity: 0.6 - freqIndex * 0.1,
-            linewidth: 2
-        });
-        const line = new THREE.Line(lineGeometry, lineMaterial);
-        
-        // Position arrow
-        arrow.position.set(direction[0] * scale, direction[1] * scale, 0);
-        const angle = Math.atan2(direction[1], direction[0]);
-        arrow.rotateZ(angle - Math.PI / 2);
-        
-        // Group them
-        const freqGroup = new THREE.Group();
-        freqGroup.add(line);
-        freqGroup.add(arrow);
-        freqGroup.position.copy(startPos);
-        
-        this.vectorGroup.add(freqGroup);
-    }
-    
-    createFrequencyMarker(position, frequency, color, freqIndex) {
-        // Create small sphere to mark frequency position
-        const sphereGeometry = new THREE.SphereGeometry(0.03 + freqIndex * 0.01, 8, 6);
-        const sphereMaterial = new THREE.MeshBasicMaterial({ 
-            color: color,
-            transparent: true,
-            opacity: 0.8 - freqIndex * 0.1
-        });
-        const sphere = new THREE.Mesh(sphereGeometry, sphereMaterial);
-        sphere.position.copy(position);
-        
-        this.vectorGroup.add(sphere);
-    }
-    
+    // FIXED: All vector creation methods use tensor-relative coordinates
     visualizeFinalRoPEEncoding(data) {
-        console.log(`Visualizing full 3D tensor with ${data.length} points`);
-        
-        // Show ALL points but with smart LOD (Level of Detail)
-        const maxVectorPoints = Math.min(500, data.length); // Limit vectors for performance
+        // Smart subsampling for vector visualization based on tensor size
+        const totalPoints = data.length;
+        const maxVectorPoints = Math.min(500, Math.max(50, totalPoints / 10));
         const vectorStep = Math.max(1, Math.floor(data.length / maxVectorPoints));
         
-        for (let i = 0; i < data.length; i++) {
+        for (let i = 0; i < data.length; i += vectorStep) {
             const point = data[i];
             if (!point || point.type !== 'final_encoding') continue;
             
+            // Use actual point position without hardcoded offsets
             const basePos = new THREE.Vector3(...point.position);
             
-            // Show vectors only on a subset for clarity
-            if (i % vectorStep === 0 && point.vectorPairs && point.vectorPairs.length > 0) {
-                this.visualizeRoPEVectors(basePos, point, true); // Simplified vectors
+            if (point.vectorPairs && point.vectorPairs.length > 0) {
+                this.visualizeRoPEVectors(basePos, point, true);
             }
         }
-        
-        console.log(`Showed vectors on ${Math.floor(data.length / vectorStep)} points`);
     }
     
+    // FIXED: Remove hardcoded position offsets, use tensor-relative positioning
     visualizeRoPEVectors(basePos, point, simplified = false) {
         const maxVectors = simplified ? Math.min(3, point.vectorPairs.length) : Math.min(6, point.vectorPairs.length);
-        
-        // Color components based on dimension contributions
-        const tColor = new THREE.Color(point.dimensionMagnitudes.t / 5, 0, 0);
-        const hColor = new THREE.Color(0, point.dimensionMagnitudes.h / 5, 0);
-        const wColor = new THREE.Color(0, 0, point.dimensionMagnitudes.w / 5);
         
         for (let v = 0; v < maxVectors; v++) {
             const vectorPair = point.vectorPairs[v];
             if (!vectorPair || !vectorPair.vectors) continue;
             
             const opacity = 0.8 - v * 0.1;
-            const scale = 1.0 - v * 0.12;
+            const scale = this.adaptiveScale.vector * (1.0 - v * 0.12);
             
-            // Offset position for different vector pairs
+            // Offset position relative to tensor spacing, not hardcoded values
             const offsetPos = new THREE.Vector3(
-                basePos.x + (v % 3 - 1) * 0.4,
-                basePos.y + Math.floor(v / 3) * 0.4,
+                basePos.x + (v % 3 - 1) * this.adaptiveScale.spacing * 0.4,
+                basePos.y + Math.floor(v / 3) * this.adaptiveScale.spacing * 0.4,
                 basePos.z
             );
             
-            // Determine color based on which dimension this vector belongs to
+            // Determine color based on dimension
             const t_count = point.dimensionEncodings.t.length;
             const h_count = point.dimensionEncodings.h.length;
             
@@ -730,14 +506,13 @@ class Visualization {
                 this.createRoPEArrow(offsetPos, vector, vectorColor, scale * 0.8, opacity, v, j);
             }
             
-            // Add encoding magnitude indicator (only for non-simplified mode)
             if (!simplified) {
                 this.createEncodingMagnitudeIndicator(offsetPos, point.magnitude, v);
             }
         }
         
-        // Add coordinate label only for key points
-        if (!simplified && Math.random() < 0.05) { // Show labels on ~5% of points
+        // Add coordinate label for some points
+        if (!simplified && Math.random() < 0.05) {
             this.addCoordinateLabel(basePos, point.originalIndices, point.coordinates);
         }
     }
@@ -746,8 +521,11 @@ class Visualization {
         const vectorLength = Math.sqrt(direction[0] * direction[0] + direction[1] * direction[1]);
         if (vectorLength < 0.05) return;
         
-        // Create arrow with high detail for final encoding
-        const arrowGeometry = new THREE.ConeGeometry(0.06, 0.2, 8);
+        // Adaptive arrow size based on tensor scale
+        const arrowRadius = this.adaptiveScale.sphere * 1.2;
+        const arrowHeight = this.adaptiveScale.sphere * 4;
+        
+        const arrowGeometry = new THREE.ConeGeometry(arrowRadius, arrowHeight, 8);
         const arrowMaterial = new THREE.MeshLambertMaterial({ 
             color: color, 
             transparent: true, 
@@ -755,7 +533,6 @@ class Visualization {
         });
         const arrow = new THREE.Mesh(arrowGeometry, arrowMaterial);
         
-        // Create line with gradient effect
         const lineGeometry = new THREE.BufferGeometry().setFromPoints([
             new THREE.Vector3(0, 0, 0),
             new THREE.Vector3(direction[0] * scale, direction[1] * scale, 0)
@@ -773,7 +550,6 @@ class Visualization {
         const angle = Math.atan2(direction[1], direction[0]);
         arrow.rotateZ(angle - Math.PI / 2);
         
-        // Create group
         const ropeGroup = new THREE.Group();
         ropeGroup.add(line);
         ropeGroup.add(arrow);
@@ -783,8 +559,8 @@ class Visualization {
     }
     
     createEncodingMagnitudeIndicator(position, magnitude, vectorIndex) {
-        // Create pulsing sphere to indicate encoding strength
-        const sphereGeometry = new THREE.SphereGeometry(0.02 + magnitude * 0.001, 8, 6);
+        const sphereRadius = this.adaptiveScale.sphere * (0.4 + magnitude * 0.02);
+        const sphereGeometry = new THREE.SphereGeometry(sphereRadius, 8, 6);
         const sphereMaterial = new THREE.MeshBasicMaterial({ 
             color: 0xffffff,
             transparent: true,
@@ -797,7 +573,6 @@ class Visualization {
     }
     
     addCoordinateLabel(position, originalIndices, coordinates) {
-        // Create text label showing T, H, W coordinates with proper mapping
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
         canvas.width = 160;
@@ -809,7 +584,6 @@ class Visualization {
         context.font = '11px Arial';
         context.textAlign = 'center';
         
-        // Show original indices and position mapping
         context.fillText(`T:${originalIndices.t} H:${originalIndices.h} W:${originalIndices.w}`, 80, 25);
         context.fillStyle = '#aaa';
         context.font = '9px Arial';
@@ -823,8 +597,8 @@ class Visualization {
             opacity: 0.8
         });
         const sprite = new THREE.Sprite(spriteMaterial);
-        sprite.scale.set(1.2, 0.6, 1);
-        sprite.position.set(position.x, position.y + 1.5, position.z);
+        sprite.scale.set(1.2 * this.adaptiveScale.spacing, 0.6 * this.adaptiveScale.spacing, 1);
+        sprite.position.set(position.x, position.y + 1.5 * this.adaptiveScale.spacing, position.z);
         
         this.vectorGroup.add(sprite);
     }
@@ -837,13 +611,15 @@ class Visualization {
         }
     }
 
+    // FIXED: Use dynamic centering instead of hardcoded offsets
     createRotationTrails(data) {
         const trailGroups = {};
+        const groupingSize = this.adaptiveScale.spacing * 4;
         
         data.forEach(point => {
             if (!point.position || point.angle === undefined) return;
             
-            const key = `${Math.floor(point.position[0] / 4)}_${Math.floor(point.position[1] / 4)}`;
+            const key = `${Math.floor(point.position[0] / groupingSize)}_${Math.floor(point.position[1] / groupingSize)}`;
             if (!trailGroups[key]) {
                 trailGroups[key] = [];
             }
@@ -857,10 +633,11 @@ class Visualization {
             const colors = [];
             
             group.forEach(point => {
-                const radius = point.radius || 1;
-                const centerX = point.position[0] - 8;
-                const centerY = point.position[1] - 15;
-                const centerZ = point.position[2] - 30;
+                const radius = (point.radius || 1) * this.adaptiveScale.spacing;
+                // Use actual position without hardcoded offsets
+                const centerX = point.position[0];
+                const centerY = point.position[1];
+                const centerZ = point.position[2];
                 
                 for (let i = 0; i < 32; i++) {
                     const angle = (i / 32) * Math.PI * 2;
@@ -939,6 +716,7 @@ class Visualization {
         this.updatePerformanceMonitor();
     }
 
+    // FIXED: Use actual tensor coordinates without hardcoded offsets
     updateRotationAnimation() {
         if (!this.currentData || this.currentData.length === 0) return;
         
@@ -955,11 +733,12 @@ class Visualization {
             const baseAngle = point.angle || 0;
             const animatedAngle = baseAngle + this.animationTime * 0.5;
             
-            const centerX = point.position[0] - 8;
-            const centerY = point.position[1] - 15;
-            const centerZ = point.position[2] - 30;
+            // Use actual position without hardcoded offsets
+            const centerX = point.position[0];
+            const centerY = point.position[1];
+            const centerZ = point.position[2];
             
-            const radius = (point.radius || 1) * 0.5;
+            const radius = (point.radius || 1) * this.adaptiveScale.spacing * 0.5;
             const x = centerX + Math.cos(animatedAngle) * radius;
             const y = centerY + Math.sin(animatedAngle) * radius;
             const z = centerZ;
