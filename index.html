@@ -11,6 +11,7 @@
     <!-- PWA manifest -->
     <!-- <link rel="manifest" href="manifest.json"> -->
     <meta name="theme-color" content="#4CAF50">
+    <meta name="mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-capable" content="yes">
     <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
     <meta name="apple-mobile-web-app-title" content="RoPE 3D">
@@ -99,38 +100,31 @@
             
             <!-- Controls panel -->
             <div class="controls-panel">
-                <!-- Step indicator -->
-                <div class="step-indicator">
-                    <div class="step-header">
-                        <div class="step-nav">
-                            <button id="prev-step" class="btn btn-nav" title="Previous Step (←)" aria-label="Previous Step">
-                                <span class="icon">←</span>
-                            </button>
-                            <div class="step-info">
-                                <span class="step-counter">
-                                    Step <span id="current-step">1</span> of <span id="total-steps">4</span>
-                                </span>
-                            </div>
-                            <button id="next-step" class="btn btn-nav" title="Next Step (→)" aria-label="Next Step">
-                                <span class="icon">→</span>
-                            </button>
-                        </div>
+                <!-- RoPE Information -->
+                <div class="rope-info">
+                    <div class="rope-header">
+                        <h3 id="rope-title" class="rope-title">3D RoPE Encoding</h3>
+                        <p id="rope-description" class="rope-description">
+                            Complete Rotary Position Encoding for 3D coordinates [t, h, w]
+                        </p>
                     </div>
                     
-                    <div class="step-content">
-                        <h3 id="step-title" class="step-title">Position Grid</h3>
-                        <p id="step-description" class="step-description">
-                            Creating 3D position coordinates for each voxel in the space
-                        </p>
-                        
-                        <div class="step-code">
-                            <pre id="step-code" class="code-block"><code># Step 1: Create position grid
-positions = torch.meshgrid(
-    torch.arange(t_len),
-    torch.arange(h_len), 
-    torch.arange(w_len)
-)</code></pre>
-                        </div>
+                    <div class="rope-code">
+                        <pre id="rope-code" class="code-block"><code># Complete 3D RoPE Implementation
+def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
+    scale = torch.linspace(0, (dim - 2) / dim, steps=dim//2)
+    omega = 1.0 / (theta**scale)
+    out = torch.einsum("...n,d->...nd", pos, omega)
+    out = torch.stack([torch.cos(out), -torch.sin(out), 
+                       torch.sin(out), torch.cos(out)], dim=-1)
+    return rearrange(out, "b n d (i j) -> b n d i j", i=2, j=2)
+
+# Apply to 3D coordinates
+freqs = torch.cat([
+    rope(t_coords, axes_dim[0], theta),  # Time encoding
+    rope(h_coords, axes_dim[1], theta),  # Height encoding  
+    rope(w_coords, axes_dim[2], theta)   # Width encoding
+], dim=-3)</code></pre>
                     </div>
                 </div>
                 
@@ -144,7 +138,7 @@ positions = torch.meshgrid(
                                 Time Length: <span id="time-value">16</span>
                             </label>
                             <input type="range" id="time-slider" class="slider" 
-                                   min="4" max="32" value="16" step="1">
+                                   min="1" max="32" value="16" step="1">
                         </div>
                         
                         <div class="parameter-item">
@@ -152,7 +146,7 @@ positions = torch.meshgrid(
                                 Height: <span id="height-value">30</span>
                             </label>
                             <input type="range" id="height-slider" class="slider" 
-                                   min="8" max="60" value="30" step="1">
+                                   min="1" max="60" value="30" step="1">
                         </div>
                         
                         <div class="parameter-item">
@@ -160,7 +154,7 @@ positions = torch.meshgrid(
                                 Width: <span id="width-value">60</span>
                             </label>
                             <input type="range" id="width-slider" class="slider" 
-                                   min="16" max="120" value="60" step="1">
+                                   min="1" max="120" value="60" step="1">
                         </div>
                         
                         <div class="parameter-item">
@@ -237,9 +231,9 @@ positions = torch.meshgrid(
                 </div>
                 <div class="footer-shortcuts">
                     <span class="shortcut">Space: Play/Pause</span>
-                    <span class="shortcut">← →: Steps</span>
                     <span class="shortcut">R: Reset</span>
                     <span class="shortcut">F: Fullscreen</span>
+                    <span class="shortcut">Mouse: Rotate/Zoom</span>
                 </div>
             </div>
         </footer>
@@ -326,6 +320,7 @@ positions = torch.meshgrid(
     <script src="lib/math.min.js"></script>
     <script src="js/utils.js"></script>
     <script src="js/rope-math.js"></script>
+    <script src="js/rope-math-new.js"></script>
     <script src="js/visualization.js"></script>
     <script src="js/ui-controls.js"></script>
     <script src="js/steps.js"></script>

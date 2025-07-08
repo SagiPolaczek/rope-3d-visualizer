@@ -183,9 +183,19 @@ class RopeVisualizer {
         if (!this.state.isInitialized || this.state.isLoading) return;
         
         try {
-            const stepData = ropeMath.getStepData(this.state.currentStep, this.state.parameters);
+            const stepData = ropeMathNew.getStepData(this.state.currentStep, this.state.parameters);
+            
+            console.log(`RoPE Tensor: t_len=${this.state.parameters.t_len}, h_len=${this.state.parameters.h_len}, w_len=${this.state.parameters.w_len}`);
+            console.log(`Generated ${stepData?.length || 0} data points (should be ${this.state.parameters.t_len * this.state.parameters.h_len * this.state.parameters.w_len})`);
             
             if (stepData && stepData.length > 0) {
+                // Update camera positioning for the current tensor dimensions
+                this.visualization.updateCameraForTensor(
+                    this.state.parameters.t_len,
+                    this.state.parameters.h_len,
+                    this.state.parameters.w_len
+                );
+                
                 this.visualization.updateVisualization(stepData, this.state.currentStep);
                 
                 if (this.state.currentStep === 2 && this.state.isAnimating) {
@@ -466,8 +476,9 @@ window.addEventListener('load', () => {
     }
 });
 
-if ('serviceWorker' in navigator) {
-    window.addEventListener('load', () => {
-        navigator.serviceWorker.register('./sw.js');
-    });
-}
+// Service worker disabled for local development
+// if ('serviceWorker' in navigator) {
+//     window.addEventListener('load', () => {
+//         navigator.serviceWorker.register('./sw.js');
+//     });
+// }

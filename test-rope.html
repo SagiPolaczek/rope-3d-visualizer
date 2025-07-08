@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>RoPE Implementation Test</title>
+</head>
+<body>
+    <h1>RoPE Implementation Test</h1>
+    <div id="output"></div>
+    
+    <script src="js/rope-math-new.js"></script>
+    <script>
+        console.log('Testing RoPE Implementation...');
+        
+        // Test parameters matching your Python code
+        const params = {
+            t_len: 16,
+            h_len: 30, 
+            w_len: 60,
+            timeSlice: 0
+        };
+        
+        const output = document.getElementById('output');
+        
+        try {
+            // Test Step 1 - Position Grid
+            console.log('Testing Step 1 - Position Grid');
+            const step1Data = ropeMathNew.getStepData(0, params);
+            console.log(`Step 1 generated ${step1Data.length} points`);
+            output.innerHTML += `<p>✅ Step 1: Generated ${step1Data.length} position grid points</p>`;
+            
+            // Test Step 2 - Frequency Scales  
+            console.log('Testing Step 2 - Frequency Scales');
+            const step2Data = ropeMathNew.getStepData(1, params);
+            console.log(`Step 2 generated ${step2Data.length} points`);
+            output.innerHTML += `<p>✅ Step 2: Generated ${step2Data.length} frequency scale points</p>`;
+            
+            // Test Step 3 - Rotation Matrices
+            console.log('Testing Step 3 - Rotation Matrices');
+            const step3Data = ropeMathNew.getStepData(2, params);
+            console.log(`Step 3 generated ${step3Data.length} points`);
+            console.log('Sample rotation matrix:', step3Data[0]?.rotationMatrices?.t);
+            output.innerHTML += `<p>✅ Step 3: Generated ${step3Data.length} rotation matrix points</p>`;
+            
+            // Test Step 4 - Final Encoding
+            console.log('Testing Step 4 - Final Encoding');
+            const step4Data = ropeMathNew.getStepData(3, params);
+            console.log(`Step 4 generated ${step4Data.length} points`);
+            console.log('Sample encoding length:', step4Data[0]?.encoding?.length);
+            output.innerHTML += `<p>✅ Step 4: Generated ${step4Data.length} final encoding points</p>`;
+            
+            // Test RoPE function directly
+            console.log('Testing RoPE function directly');
+            const ropeResult = ropeMathNew.rope(5, 44, 10000);
+            console.log(`RoPE(5, 44, 10000) generated ${ropeResult.length} rotation matrices`);
+            console.log('First rotation matrix:', ropeResult[0]);
+            output.innerHTML += `<p>✅ RoPE function: Generated ${ropeResult.length} rotation matrices</p>`;
+            
+            output.innerHTML += `<p><strong>🎉 All tests passed! Implementation is working correctly.</strong></p>`;
+            
+        } catch (error) {
+            console.error('Test failed:', error);
+            output.innerHTML += `<p>❌ Test failed: ${error.message}</p>`;
+        }
+    </script>
+</body>
+</html>

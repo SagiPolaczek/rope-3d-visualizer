@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test RoPE Implementation</title>
+</head>
+<body>
+    <h1>RoPE Implementation Test</h1>
+    <div id="output"></div>
+    
+    <script src="js/rope-math-new.js"></script>
+    <script>
+        const output = document.getElementById('output');
+        
+        function log(message) {
+            output.innerHTML += message + '<br>';
+            console.log(message);
+        }
+        
+        // Test the RoPE implementation
+        const rope = new RopeMathNew();
+        
+        log('=== Testing RoPE Implementation ===');
+        
+        // Test 1: Simple 1x1x1 tensor
+        log('Test 1: 1x1x1 tensor');
+        const data1 = rope.getStepData(0, {
+            t_len: 1,
+            h_len: 1,
+            w_len: 1,
+            timeSlice: 0
+        });
+        log(`Generated ${data1.length} points`);
+        if (data1.length > 0) {
+            log(`First point position: [${data1[0].position.join(', ')}]`);
+            log(`First point coordinates: t=${data1[0].coordinates.t}, h=${data1[0].coordinates.h}, w=${data1[0].coordinates.w}`);
+        }
+        
+        log('');
+        
+        // Test 2: 2x2x2 tensor
+        log('Test 2: 2x2x2 tensor');
+        const data2 = rope.getStepData(0, {
+            t_len: 2,
+            h_len: 2,
+            w_len: 2,
+            timeSlice: 0
+        });
+        log(`Generated ${data2.length} points`);
+        if (data2.length > 0) {
+            log('First few points:');
+            for (let i = 0; i < Math.min(4, data2.length); i++) {
+                const point = data2[i];
+                log(`  Point ${i}: position=[${point.position.join(', ')}], coords=(t=${point.coordinates.t}, h=${point.coordinates.h}, w=${point.coordinates.w})`);
+            }
+        }
+        
+        log('');
+        
+        // Test 3: Check RoPE frequencies directly
+        log('Test 3: RoPE frequency calculation');
+        const testRope = rope.rope(1, 44, 10000);
+        log(`RoPE(pos=1, dim=44) returned ${testRope.length} rotation matrices`);
+        if (testRope.length > 0) {
+            log(`First rotation matrix: [[${testRope[0][0].join(', ')}], [${testRope[0][1].join(', ')}]]`);
+            log(`Second rotation matrix: [[${testRope[1][0].join(', ')}], [${testRope[1][1].join(', ')}]]`);
+        }
+        
+        log('');
+        
+        // Test 4: Check embedND
+        log('Test 4: EmbedND calculation');
+        const embedding = rope.embedND([1, 1, 1]);
+        log(`EmbedND([1,1,1]) returned ${embedding.length} rotation matrices`);
+        
+        log('');
+        log('=== Test Complete ===');
+    </script>
+</body>
+</html>

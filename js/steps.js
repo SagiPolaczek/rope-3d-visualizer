@@ -3,83 +3,32 @@ class StepManager {
         this.steps = [
             {
                 id: 0,
-                title: 'Position Grid',
-                description: 'Creating 3D position coordinates for each voxel in the space',
-                code: `# Step 1: Create 3D position grid
-t_coords = torch.arange(t_len)  # Time coordinates
-h_coords = torch.arange(h_len)  # Height coordinates  
-w_coords = torch.arange(w_len)  # Width coordinates
+                title: '3D RoPE Encoding',
+                description: 'Complete Rotary Position Encoding for 3D coordinates [t, h, w]',
+                code: `# Complete 3D RoPE Implementation
+def rope(pos: Tensor, dim: int, theta: int) -> Tensor:
+    assert dim % 2 == 0
+    scale = torch.linspace(0, (dim - 2) / dim, steps=dim//2)
+    omega = 1.0 / (theta**scale)
+    out = torch.einsum("...n,d->...nd", pos, omega)
+    out = torch.stack([torch.cos(out), -torch.sin(out), 
+                       torch.sin(out), torch.cos(out)], dim=-1)
+    return rearrange(out, "b n d (i j) -> b n d i j", i=2, j=2)
 
-# Create meshgrid for all combinations
-positions = torch.meshgrid(t_coords, h_coords, w_coords)
-grid = torch.stack(positions, dim=-1)  # [t_len, h_len, w_len, 3]`,
-                explanation: 'Each point in 3D space gets coordinates [t, h, w] representing its position in time, height, and width dimensions.',
-                colorLegend: {
-                    red: 'Time dimension (T)',
-                    green: 'Height dimension (H)', 
-                    blue: 'Width dimension (W)'
-                }
-            },
-            {
-                id: 1,
-                title: 'Frequency Scale',
-                description: 'Different dimensions get different frequency scales for encoding',
-                code: `# Step 2: Calculate frequency scales
-scale = torch.linspace(0, (dim-2)/dim, dim//2)
-omega = 1.0 / (theta ** scale)  # Frequency for each dimension
+# Apply to 3D coordinates
+freqs_t = rope(t_coords, axes_dim[0], theta)  # Time encoding
+freqs_h = rope(h_coords, axes_dim[1], theta)  # Height encoding  
+freqs_w = rope(w_coords, axes_dim[2], theta)  # Width encoding
 
-# Different frequencies for each axis
-freq_t = omega[:t_dim//2]  # Time frequencies
-freq_h = omega[t_dim//2:(t_dim+h_dim)//2]  # Height frequencies  
-freq_w = omega[(t_dim+h_dim)//2:]  # Width frequencies`,
-                explanation: 'Lower frequencies capture long-range dependencies, higher frequencies capture fine-grained patterns.',
+# Concatenate all encodings
+freqs = torch.cat([freqs_t, freqs_h, freqs_w], dim=-3)`,
+                explanation: 'Each 3D position gets encoded as rotation matrices that capture relative positional relationships across time, height, and width dimensions.',
                 colorLegend: {
-                    hue: 'Frequency magnitude',
-                    saturation: 'Encoding strength',
-                    lightness: 'Position influence'
-                }
-            },
-            {
-                id: 2,
-                title: 'Rotation Matrix',
-                description: 'Rotation matrices using sin/cos functions encode positional relationships',
-                code: `# Step 3: Apply rotational encoding
-for i in range(dim//2):
-    freq = omega[i]
-    
-    # Calculate rotation angles
-    angles_t = t_coords * freq
-    angles_h = h_coords * freq
-    angles_w = w_coords * freq
-    
-    # Apply rotation matrices
-    encoding[..., 2*i] = torch.sin(angles)
-    encoding[..., 2*i+1] = torch.cos(angles)`,
-                explanation: 'Each frequency creates rotating patterns that encode relative positions between tokens.',
-                colorLegend: {
-                    hue: 'Rotation angle',
-                    motion: 'Circular rotation',
-                    trails: 'Encoding paths'
-                }
-            },
-            {
-                id: 3,
-                title: 'Final Encoding',
-                description: 'All dimensional encodings concatenated to create final positional embedding',
-                code: `# Step 4: Concatenate all encodings
-rope_encoding = torch.cat([
-    sin_cos_t,  # Time dimension encodings
-    sin_cos_h,  # Height dimension encodings
-    sin_cos_w   # Width dimension encodings
-], dim=-1)
-
-# Final 3D RoPE embedding
-final_embedding = rope_encoding  # [t_len, h_len, w_len, dim]`,
-                explanation: 'The complete positional encoding combines all dimensional information into a single embedding vector.',
-                colorLegend: {
-                    spectrum: 'Encoding magnitude',
-                    brightness: 'Information density',
-                    variation: 'Positional uniqueness'
+                    red: 'Time dimension encoding (T)',
+                    green: 'Height dimension encoding (H)', 
+                    blue: 'Width dimension encoding (W)',
+                    arrows: 'Rotation matrix vectors',
+                    spheres: 'Encoding magnitude'
                 }
             }
         ];

@@ -44,11 +44,29 @@ class RopeMath {
             return this.cache.get(cacheKey);
         }
 
+        // Match Python: torch.linspace(0, (dim - 2) / dim, steps=dim//2)
         const scale = this.linspace(0, (dim - 2) / dim, Math.floor(dim / 2));
         const omega = scale.map(s => 1.0 / Math.pow(theta, s));
         
         this.updateCache(cacheKey, omega);
         return omega;
+    }
+
+    rope(pos, dim, theta) {
+        // Match Python rope function
+        const scale = this.linspace(0, (dim - 2) / dim, Math.floor(dim / 2));
+        const omega = scale.map(s => 1.0 / Math.pow(theta, s));
+        
+        const result = [];
+        for (let i = 0; i < omega.length; i++) {
+            const angle = pos * omega[i];
+            // Python: torch.stack([torch.cos(out), -torch.sin(out), torch.sin(out), torch.cos(out)], dim=-1)
+            result.push([
+                [Math.cos(angle), -Math.sin(angle)],
+                [Math.sin(angle), Math.cos(angle)]
+            ]);
+        }
+        return result;
     }
 
     generateRotationMatrix(angle) {
@@ -72,32 +90,22 @@ class RopeMath {
         const omega_w = this.calculateFrequencyScales(w_dim, theta);
 
         const encodedPositions = positions.map(([t, h, w]) => {
+            // Generate rope encodings for each axis (matching Python implementation)
+            const rope_t = this.rope(t + timeSlice, t_dim, theta);
+            const rope_h = this.rope(h, h_dim, theta);
+            const rope_w = this.rope(w, w_dim, theta);
+            
+            // Concatenate all rope encodings (match Python torch.cat)
+            const allRopes = [...rope_t, ...rope_h, ...rope_w];
+            
+            // Convert 2x2 rotation matrices to encoding values
             const encoding = [];
-            
-            let dim_idx = 0;
-            
-            for (let i = 0; i < Math.floor(t_dim / 2); i++) {
-                const freq = omega_t[i];
-                const angle = (t + timeSlice) * freq;
-                encoding.push(Math.sin(angle));
-                encoding.push(Math.cos(angle));
-                dim_idx += 2;
-            }
-            
-            for (let i = 0; i < Math.floor(h_dim / 2); i++) {
-                const freq = omega_h[i];
-                const angle = h * freq;
-                encoding.push(Math.sin(angle));
-                encoding.push(Math.cos(angle));
-                dim_idx += 2;
-            }
-            
-            for (let i = 0; i < Math.floor(w_dim / 2); i++) {
-                const freq = omega_w[i];
-                const angle = w * freq;
-                encoding.push(Math.sin(angle));
-                encoding.push(Math.cos(angle));
-                dim_idx += 2;
+            for (const rotMat of allRopes) {
+                // Extract rotation matrix values
+                encoding.push(rotMat[0][0]); // cos
+                encoding.push(rotMat[0][1]); // -sin
+                encoding.push(rotMat[1][0]); // sin
+                encoding.push(rotMat[1][1]); // cos
             }
             
             while (encoding.length < dim) {
@@ -107,11 +115,8 @@ class RopeMath {
             return {
                 position: [t, h, w],
                 encoding: encoding.slice(0, dim),
-                frequencies: {
-                    t: omega_t,
-                    h: omega_h,
-                    w: omega_w
-                }
+                rotationMatrices: allRopes,
+                magnitude: Math.sqrt(encoding.reduce((sum, val) => sum + val * val, 0))
             };
         });
 
@@ -179,24 +184,57 @@ class RopeMath {
 
     getRotationMatrixData(positions, params) {
         const { dim, theta, timeSlice } = params;
-        const time = timeSlice * 0.1;
         
         return positions.map(([t, h, w]) => {
-            const angle = (t + h + w + time) * 0.1;
-            const radius = 0.5 + 0.3 * Math.sin(angle);
+            // Generate actual RoPE rotation matrices for visualization
+            const rope_t = this.rope(t + timeSlice, 44, theta);
+            const rope_h = this.rope(h, 42, theta);
+            const rope_w = this.rope(w, 42, theta);
             
-            const rotatedX = (t - 8) * Math.cos(angle) - (h - 15) * Math.sin(angle) + 8;
-            const rotatedY = (t - 8) * Math.sin(angle) + (h - 15) * Math.cos(angle) + 15;
+            // Use first rotation matrix from each axis for visualization
+            const rotMat_t = rope_t[0] || [[1, 0], [0, 1]];
+            const rotMat_h = rope_h[0] || [[1, 0], [0, 1]];
+            const rotMat_w = rope_w[0] || [[1, 0], [0, 1]];
             
-            const hue = ((angle % (2 * Math.PI)) / (2 * Math.PI)) * 360;
+            // Create vectors to visualize the rotation
+            const baseVector = [1, 0]; // Unit vector
+            
+            // Apply rotation matrices
+            const rotated_t = [
+                baseVector[0] * rotMat_t[0][0] + baseVector[1] * rotMat_t[0][1],
+                baseVector[0] * rotMat_t[1][0] + baseVector[1] * rotMat_t[1][1]
+            ];
+            
+            const rotated_h = [
+                baseVector[0] * rotMat_h[0][0] + baseVector[1] * rotMat_h[0][1],
+                baseVector[0] * rotMat_h[1][0] + baseVector[1] * rotMat_h[1][1]
+            ];
+            
+            const rotated_w = [
+                baseVector[0] * rotMat_w[0][0] + baseVector[1] * rotMat_w[0][1],
+                baseVector[0] * rotMat_w[1][0] + baseVector[1] * rotMat_w[1][1]
+            ];
+            
+            // Color based on rotation angle
+            const angle_t = Math.atan2(rotated_t[1], rotated_t[0]);
+            const hue = ((angle_t + Math.PI) / (2 * Math.PI)) * 360;
             
             return {
-                position: [rotatedX, rotatedY, w],
+                position: [t, h, w],
                 color: this.hslToRgb(hue, 0.9, 0.7),
                 encoding: null,
                 step: 2,
-                angle: angle,
-                radius: radius
+                rotationMatrices: {
+                    t: rotMat_t,
+                    h: rotMat_h,
+                    w: rotMat_w
+                },
+                rotatedVectors: {
+                    t: rotated_t,
+                    h: rotated_h,
+                    w: rotated_w
+                },
+                angle: angle_t
             };
         });
     }
@@ -205,18 +243,24 @@ class RopeMath {
         const encodedPositions = this.apply3DRoPE(positions, params.dim, params.theta, params.timeSlice);
         
         return encodedPositions.map(data => {
-            const { position, encoding } = data;
-            const encodingMagnitude = Math.sqrt(encoding.reduce((sum, val) => sum + val * val, 0));
-            const normalizedMagnitude = Math.min(encodingMagnitude / 10, 1);
+            const { position, encoding, magnitude } = data;
             
-            const hue = (normalizedMagnitude * 240) % 360;
+            // Enhanced visualization of RoPE values
+            const normalizedMagnitude = Math.min(magnitude / 50, 1); // Adjusted scale
+            
+            // Color based on encoding magnitude
+            const hue = (normalizedMagnitude * 300) % 360; // More color range
+            
+            // Make points more visible based on encoding strength
+            const pointSize = 0.5 + normalizedMagnitude * 1.5;
             
             return {
                 position: position,
-                color: this.hslToRgb(hue, 0.8, 0.6),
+                color: this.hslToRgb(hue, 0.9, 0.7), // More saturated colors
                 encoding: encoding,
                 step: 3,
-                magnitude: encodingMagnitude
+                magnitude: magnitude,
+                size: pointSize
             };
         });
     }
