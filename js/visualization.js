@@ -95,22 +95,21 @@ class Visualization {
         };
     }
     
-    // FIXED: Adaptive scaling based on tensor dimensions
+    // FIXED: Adaptive scaling based on tensor dimensions with consistent grid spacing
     getAdaptiveScale(t_len, h_len, w_len) {
         const maxDim = Math.max(t_len, h_len, w_len);
-        const totalPoints = t_len * h_len * w_len;
+        const gridSpacing = 0.8; // Fixed grid spacing (consistent with RoPE math)
         
-        // Adaptive sphere radius: smaller for denser tensors
-        const baseSphereRadius = 0.1;
-        const sphereScale = Math.max(0.02, baseSphereRadius / Math.pow(maxDim, 0.3));
+        // Adaptive sphere radius: smaller for denser tensors, relative to grid spacing
+        const baseSphereRadius = 0.12;
+        const sphereScale = Math.max(0.03, baseSphereRadius / Math.pow(maxDim, 0.3)) * gridSpacing;
         
-        // Adaptive vector scaling
+        // Adaptive vector scaling relative to grid spacing
         const baseVectorScale = 1.0;
-        const vectorScale = baseVectorScale * Math.max(0.5, Math.min(2.0, 10 / maxDim));
+        const vectorScale = baseVectorScale * Math.max(0.5, Math.min(2.0, 10 / maxDim)) * gridSpacing;
         
-        // Adaptive spacing
-        const baseSpacing = 1.0;
-        const spacingScale = baseSpacing * Math.max(0.3, Math.min(1.5, 20 / maxDim));
+        // Consistent spacing matches the fixed grid spacing
+        const spacingScale = gridSpacing;
         
         return {
             sphere: sphereScale,
@@ -158,10 +157,13 @@ class Visualization {
         // Store tensor dimensions
         this.tensorDimensions = { t_len, h_len, w_len };
         
-        // Calculate tensor center (matches data coordinate system)
-        const centerX = (w_len - 1) / 2;
-        const centerY = (h_len - 1) / 2;  
-        const centerZ = (t_len - 1) / 2;
+        // Consistent grid spacing for tighter visualization (matches RoPE math)
+        const gridSpacing = 0.8;
+        
+        // Calculate tensor center (matches data coordinate system with grid spacing)
+        const centerX = (w_len - 1) / 2 * gridSpacing;
+        const centerY = (h_len - 1) / 2 * gridSpacing;  
+        const centerZ = (t_len - 1) / 2 * gridSpacing;
         
         // Update stored tensor center
         this.tensorCenter = { x: centerX, y: centerY, z: centerZ };
@@ -202,12 +204,13 @@ class Visualization {
             }
         }
         
-        // Update axes helper size
+        // Update axes helper size (accounting for grid spacing)
         if (this.axesHelper) {
             this.scene.remove(this.axesHelper);
-            const axesSize = Math.max(5, Math.min(25, Math.max(this.tensorDimensions.t_len, 
-                                                               this.tensorDimensions.h_len, 
-                                                               this.tensorDimensions.w_len) * 0.8));
+            const maxDim = Math.max(this.tensorDimensions.t_len, 
+                                   this.tensorDimensions.h_len, 
+                                   this.tensorDimensions.w_len);
+            const axesSize = Math.max(3, Math.min(20, maxDim * this.adaptiveScale.spacing * 0.6));
             this.axesHelper = new THREE.AxesHelper(axesSize);
             this.axesHelper.position.set(
                 this.tensorCenter.x - axesSize * 0.8,
@@ -503,21 +506,21 @@ class Visualization {
             // Draw both vectors in the pair
             for (let j = 0; j < vectorPair.vectors.length; j++) {
                 const vector = vectorPair.vectors[j];
-                this.createRoPEArrow(offsetPos, vector, vectorColor, scale * 0.8, opacity, v, j);
+                this.createRoPEArrow(offsetPos, vector, vectorColor, scale * 0.8, opacity);
             }
             
             if (!simplified) {
-                this.createEncodingMagnitudeIndicator(offsetPos, point.magnitude, v);
+                this.createEncodingMagnitudeIndicator(offsetPos, point.magnitude);
             }
         }
         
         // Add coordinate label for some points
         if (!simplified && Math.random() < 0.05) {
-            this.addCoordinateLabel(basePos, point.originalIndices, point.coordinates);
+            this.addCoordinateLabel(basePos, point.originalIndices);
         }
     }
     
-    createRoPEArrow(startPos, direction, color, scale, opacity, vectorIndex, subIndex) {
+    createRoPEArrow(startPos, direction, color, scale, opacity) {
         const vectorLength = Math.sqrt(direction[0] * direction[0] + direction[1] * direction[1]);
         if (vectorLength < 0.05) return;
         
@@ -558,7 +561,7 @@ class Visualization {
         this.vectorGroup.add(ropeGroup);
     }
     
-    createEncodingMagnitudeIndicator(position, magnitude, vectorIndex) {
+    createEncodingMagnitudeIndicator(position, magnitude) {
         const sphereRadius = this.adaptiveScale.sphere * (0.4 + magnitude * 0.02);
         const sphereGeometry = new THREE.SphereGeometry(sphereRadius, 8, 6);
         const sphereMaterial = new THREE.MeshBasicMaterial({ 
@@ -572,7 +575,7 @@ class Visualization {
         this.vectorGroup.add(sphere);
     }
     
-    addCoordinateLabel(position, originalIndices, coordinates) {
+    addCoordinateLabel(position, originalIndices) {
         const canvas = document.createElement('canvas');
         const context = canvas.getContext('2d');
         canvas.width = 160;

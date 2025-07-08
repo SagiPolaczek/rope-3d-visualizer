@@ -7,6 +7,9 @@ class RopeMathNew {
         this.dim = 128;
         this.theta = 10000.0;
         this.axes_dim = [44, 42, 42];
+        
+        // Consistent grid spacing for tighter visualization
+        this.gridSpacing = 0.8; // Fixed spacing between grid points
     }
 
     // Exact implementation of your Python rope function
@@ -388,11 +391,11 @@ class RopeMathNew {
             const vectorPairs = this.generateVectorPairs(embedding);
             
             return {
-                // Perfect 3D grid: each unit is 1.0 apart for clean alignment
+                // Consistent grid spacing for tighter, uniform visualization
                 position: [
-                    w,  // X-axis: Width (0 to w_len-1)
-                    h,  // Y-axis: Height (0 to h_len-1)  
-                    t   // Z-axis: Time (0 to t_len-1)
+                    w * this.gridSpacing,  // X-axis: Width with consistent spacing
+                    h * this.gridSpacing,  // Y-axis: Height with consistent spacing  
+                    t * this.gridSpacing   // Z-axis: Time with consistent spacing
                 ],
                 color: [r, g, b],
                 type: 'final_encoding',

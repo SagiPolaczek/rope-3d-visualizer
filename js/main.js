@@ -12,9 +12,9 @@ class RopeVisualizer {
             currentStep: 0,
             isAnimating: false,
             parameters: {
-                t_len: 16,
-                h_len: 30,
-                w_len: 60,
+                t_len: 8,
+                h_len: 15,
+                w_len: 30,
                 dim: 128,
                 theta: 10000,
                 timeSlice: 0,
@@ -263,9 +263,9 @@ class RopeVisualizer {
         this.stopAnimation();
         
         this.state.parameters = {
-            t_len: 16,
-            h_len: 30,
-            w_len: 60,
+            t_len: 8,
+            h_len: 15,
+            w_len: 30,
             dim: 128,
             theta: 10000,
             timeSlice: 0,
