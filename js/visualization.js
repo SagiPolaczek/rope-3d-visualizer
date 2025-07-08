@@ -22,6 +22,9 @@ class Visualization {
         this.tensorDimensions = { t_len: 1, h_len: 1, w_len: 1 };
         this.adaptiveScale = { sphere: 0.05, vector: 1.0, spacing: 1.0 };
         
+        // Consistent grid spacing for all calculations
+        this.gridSpacing = 0.8;
+        
         this.geometry = null;
         this.material = null;
         this.instancedMesh = null;
@@ -98,18 +101,17 @@ class Visualization {
     // FIXED: Adaptive scaling based on tensor dimensions with consistent grid spacing
     getAdaptiveScale(t_len, h_len, w_len) {
         const maxDim = Math.max(t_len, h_len, w_len);
-        const gridSpacing = 0.8; // Fixed grid spacing (consistent with RoPE math)
         
         // Adaptive sphere radius: smaller for denser tensors, relative to grid spacing
         const baseSphereRadius = 0.12;
-        const sphereScale = Math.max(0.03, baseSphereRadius / Math.pow(maxDim, 0.3)) * gridSpacing;
+        const sphereScale = Math.max(0.03, baseSphereRadius / Math.pow(maxDim, 0.3)) * this.gridSpacing;
         
         // Adaptive vector scaling relative to grid spacing
         const baseVectorScale = 1.0;
-        const vectorScale = baseVectorScale * Math.max(0.5, Math.min(2.0, 10 / maxDim)) * gridSpacing;
+        const vectorScale = baseVectorScale * Math.max(0.5, Math.min(2.0, 10 / maxDim)) * this.gridSpacing;
         
         // Consistent spacing matches the fixed grid spacing
-        const spacingScale = gridSpacing;
+        const spacingScale = this.gridSpacing;
         
         return {
             sphere: sphereScale,
@@ -157,20 +159,18 @@ class Visualization {
         // Store tensor dimensions
         this.tensorDimensions = { t_len, h_len, w_len };
         
-        // Consistent grid spacing for tighter visualization (matches RoPE math)
-        const gridSpacing = 0.8;
-        
         // Calculate tensor center (matches data coordinate system with grid spacing)
-        const centerX = (w_len - 1) / 2 * gridSpacing;
-        const centerY = (h_len - 1) / 2 * gridSpacing;  
-        const centerZ = (t_len - 1) / 2 * gridSpacing;
+        const centerX = (w_len - 1) / 2 * this.gridSpacing;
+        const centerY = (h_len - 1) / 2 * this.gridSpacing;  
+        const centerZ = (t_len - 1) / 2 * this.gridSpacing;
         
         // Update stored tensor center
         this.tensorCenter = { x: centerX, y: centerY, z: centerZ };
         
-        // Calculate optimal camera distance based on tensor size
+        // Calculate optimal camera distance based on tensor size with grid spacing
         const maxDim = Math.max(w_len, h_len, t_len);
-        const distance = Math.max(30, maxDim * 2);
+        const tensorSize = maxDim * this.gridSpacing;
+        const distance = Math.max(20, tensorSize * 3);
         
         // Position camera at optimal viewing angle
         this.camera.position.set(
@@ -210,12 +210,12 @@ class Visualization {
             const maxDim = Math.max(this.tensorDimensions.t_len, 
                                    this.tensorDimensions.h_len, 
                                    this.tensorDimensions.w_len);
-            const axesSize = Math.max(3, Math.min(20, maxDim * this.adaptiveScale.spacing * 0.6));
+            const axesSize = Math.max(2, Math.min(15, maxDim * this.gridSpacing * 0.5));
             this.axesHelper = new THREE.AxesHelper(axesSize);
             this.axesHelper.position.set(
-                this.tensorCenter.x - axesSize * 0.8,
-                this.tensorCenter.y - axesSize * 0.8,
-                this.tensorCenter.z - axesSize * 0.8
+                -axesSize * 0.1,
+                -axesSize * 0.1,
+                -axesSize * 0.1
             );
             this.scene.add(this.axesHelper);
         }
@@ -348,10 +348,10 @@ class Visualization {
             return;
         }
         
-        // Update tensor center from data
-        this.tensorCenter = this.getTensorCenter(data);
+        // Don't recalculate tensor center from data - use the one set by updateCameraForTensor
+        // this.tensorCenter = this.getTensorCenter(data);
         
-        // Extract tensor dimensions from data for camera positioning
+        // Extract tensor dimensions from data for consistency checks
         if (data[0] && data[0].originalIndices) {
             let maxT = 0, maxH = 0, maxW = 0;
             for (const point of data) {
@@ -361,10 +361,19 @@ class Visualization {
                     maxW = Math.max(maxW, point.originalIndices.w);
                 }
             }
-            this.tensorDimensions = { t_len: maxT + 1, h_len: maxH + 1, w_len: maxW + 1 };
-            this.adaptiveScale = this.getAdaptiveScale(this.tensorDimensions.t_len, 
-                                                       this.tensorDimensions.h_len, 
-                                                       this.tensorDimensions.w_len);
+            const detectedDimensions = { t_len: maxT + 1, h_len: maxH + 1, w_len: maxW + 1 };
+            
+            // Only update if dimensions actually changed (to avoid camera jumping)
+            if (this.tensorDimensions.t_len !== detectedDimensions.t_len ||
+                this.tensorDimensions.h_len !== detectedDimensions.h_len ||
+                this.tensorDimensions.w_len !== detectedDimensions.w_len) {
+                
+                this.tensorDimensions = detectedDimensions;
+                this.adaptiveScale = this.getAdaptiveScale(this.tensorDimensions.t_len, 
+                                                           this.tensorDimensions.h_len, 
+                                                           this.tensorDimensions.w_len);
+                this.updateVisualizationScale();
+            }
         }
         
         // Apply LOD (Level of Detail) for performance

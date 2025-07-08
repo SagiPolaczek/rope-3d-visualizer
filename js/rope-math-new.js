@@ -8,7 +8,7 @@ class RopeMathNew {
         this.theta = 10000.0;
         this.axes_dim = [44, 42, 42];
         
-        // Consistent grid spacing for tighter visualization
+        // Consistent grid spacing for tighter visualization (matches visualization.js)
         this.gridSpacing = 0.8; // Fixed spacing between grid points
     }
 
